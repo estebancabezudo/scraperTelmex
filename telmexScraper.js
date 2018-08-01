@@ -4,6 +4,19 @@ const mkdirp = require('mkdirp-promise');
 
 const CREDS = require('./configuration');
 
+if (process.argv.length !== 2) {
+    if (process.argv.length !== 4) {
+        console.log('Utilice node telmexScraper.js [usuario contraseña]');
+        return;
+    } else {
+        CREDS.username = process.argv[2];
+        CREDS.password = process.argv[3];
+        console.log(`Usando el usuario ${CREDS.username} y la contraseña ${CREDS.password} tomados como parámetros.`);
+    }
+} else {
+    console.log(`Usando el usuario y la contraseña tomados del archivo de configuración.`);
+}
+
 const parseDataUrl = (dataUrl) => {
     const matches = dataUrl.match(/^data:(.+);base64,(.+)$/);
     if (matches.length !== 3) {
@@ -38,7 +51,7 @@ const getDataUrlThroughFetch = async (url) => {
     const LOGOUT_ANCHOR_SELECTOR = '#menuPerfil > li:nth-child(2) > a';
     const RECIPE_NUMBER_TO_DOWNLOAD = 12;
 
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({ headless: false });
 
     try {
         const fileStoragePath = CREDS.fileStorage + '/' + CREDS.username;
@@ -59,13 +72,14 @@ const getDataUrlThroughFetch = async (url) => {
         console.log('Buscando el botón para ir a la pagina de acceso de usuarios.');
         // Hay dos enlaces con el texto y el id del elemento con id puede cambiar porque hace referencia a una instancia
         // Por eso buscamos con todo el selector menos el elemento con el id
-        await page.click('div > div > div.journal-content-article > div > div > figure > figcaption > a');
 
         // Buscamos el botón para sacarle la referencia porque lo abre en otra ventana.
         // La referencia tiene un query string que no sabemos si usa para normatividad y pueda ser bloqueado
         const href = await page.evaluate(() => {
             return document.querySelector('div > div > div.journal-content-article > div > div > figure > figcaption > a').getAttribute('href');
         });
+
+        console.log(`Abriendo página ${href}.`);
 
         // Abrimos la referencia sobre la página ya abierta.
         await page.goto(href).catch(error => { throw `No puedo abrir la página de acceso: ${href}` });
@@ -75,25 +89,31 @@ const getDataUrlThroughFetch = async (url) => {
 
         console.log('Página de acceso abierta.');
 
+        await page.click(USERNAME_SELECTOR).catch(error => { throw 'Entrada de nombre de usuario no encontrada.'; });
+        console.log('Escribiendo el usuario en el elemento de entrada de usuario.');
+        await page.keyboard.type(CREDS.username);
+
+        await page.click(PASSWORD_SELECTOR).catch(error => { throw 'Entrada de contraaseña no encontrada.'; });
+        await page.keyboard.type(CREDS.password);
+        console.log('Escribiendo contraseña.');
+
+        await page.click(LOGIN_BUTTON_SELECTOR).catch(error => { throw `No puedo encontrar el botón para acceder.`; });
+        console.log('Botón de acceso encontrado');
+
+        await page.waitForNavigation().catch(error => { throw 'Demasiado tiempo para acceder a la pagina de inicio de usuario.'; });
+
+        const isBadLoggin = (await page.content()).match(/son.incorrectos/gi)
+        if (isBadLoggin !== null) {
+            throw 'Usuario y contraseña incorrectos.';
+        }
+
+        const isLogged = (await page.content()).match(/Existe.una/gi)
+        if (isLogged !== null) {
+            throw 'Hay otra sesión abierta. El sitio solo permite una a la vez.';
+        }
+
+        console.log('Acceso correcto.');
         try {
-            await page.click(USERNAME_SELECTOR).catch(error => { throw 'Entrada de nombre de usuario no encontrada.'; });
-            console.log('Escribiendo el usuario en el elemento de entrada de usuario.');
-            await page.keyboard.type(CREDS.username);
-
-            await page.click(PASSWORD_SELECTOR).catch(error => { throw 'Entrada de contraaseña no encontrada.'; });
-            await page.keyboard.type(CREDS.password);
-            console.log('Escribiendo contraseña.');
-
-            await page.click(LOGIN_BUTTON_SELECTOR).catch(error => { throw `No puedo encontrar el botón para acceder.`; });
-            console.log('Botón de acceso encontrado');
-
-            await page.waitForNavigation().catch(error => { throw 'Demasiado tiempo para acceder a la pagina de inicio de usuario.'; });
-
-            const isLogged = (await page.content()).match(/Existe.una/gi)
-            if (isLogged !== null) {
-                throw 'Hay otra sesión abierta. El sitio solo permite una a la vez.';
-            }
-
             let uri;
             let dataUrl;
             let result;
@@ -127,6 +147,6 @@ const getDataUrlThroughFetch = async (url) => {
         console.log(error);
     } finally {
         console.log('Cerrando el navegador.');
-        browser.close();
+        //   browser.close();
     }
 })();
